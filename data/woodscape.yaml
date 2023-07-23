@@ -1,0 +1,9 @@
+
+path:  /home/gzz/机械硬盘/sda3/woodscape/woodscape/ # dataset root dir
+train: images/train  # train images (relative to 'path') 128 images
+val: images/val # val images (relative to 'path') 128 images
+test:  # test images (optional)
+
+# Classes
+nc: 5  # number of classes
+names: ["vehicles", "person", "bicycle", "traffic_light", "traffic_sign"]  # class names
