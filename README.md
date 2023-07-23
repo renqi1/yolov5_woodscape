@@ -20,7 +20,7 @@
 ### 新增功能1：随机裁剪加多尺度数据增强
 yolov5没有裁剪的数据增强方法，所以我就想自己加上去好了，因为它对小目标的检测效果好。
 
-参考mmdetecion的代码更改（[链接](mmdetection:https://github.com/open-mmlab/mmocr/blob/main/mmocr/datasets/transforms/ocr_transforms.py)),
+参考mmdetecion的代码更改([链接](https://github.com/open-mmlab/mmocr/blob/main/mmocr/datasets/transforms/ocr_transforms.py)),
 裁剪的尺度必须小于图像宽高最小值，并且以640尺度训练才能使用哈，裁剪的图至少包含k个目标，k设置较大时crop设置为1（代码特性）
 
 <img src="images/rcms.jpg" width="600px"/>
