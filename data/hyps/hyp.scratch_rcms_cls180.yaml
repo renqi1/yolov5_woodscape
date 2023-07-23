@@ -38,4 +38,4 @@ k: 0 # crop image contain at least k objects (k = 1,2,3...)
 theta: 0.1 # theta loss gain
 theta_pw: 1.0 # theta BCELoss positive_weight
 cls_theta: 180
-sig: 4
+sig: 2
