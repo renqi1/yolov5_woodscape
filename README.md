@@ -7,7 +7,7 @@
 
 检测结果展示：
 
-<img src="images/00015_FV.png" width="350px"/><img src="images/00062_MVR.png" width="350px"/>
+<img src="images/00015FV.png" width="350px"/><img src="images/00062_MVR.png" width="350px"/>
 
 ### 标签格式
 
