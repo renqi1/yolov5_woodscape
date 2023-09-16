@@ -13,10 +13,10 @@ anchors:
 # YOLOv5 v6.0 backbone
 
 backbone:
-  # [from, number, module, args]
+# [from, number, module, args]
 # f:取输出的层数，-1表示上一层
 # n:重复次数,受depth_multiple的影响,conv层就是重复的次数，c3层则是bottleneck的重复次数
-# m:层名，eval后从common（或models.yolo或torch.nn.modules.upsampling）调用
+# m:层名，在common.py中定义
 # args: 相应层的初始化参数
   [[-1, 1, Conv, [64, 6, 2, 2]],  # 0-P1/2
    [-1, 1, Conv, [128, 3, 2]],  # 1-P2/4
