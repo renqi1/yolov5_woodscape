@@ -318,11 +318,11 @@ def generate_2d_boxes_yolo_rotate(shape, parser, class_names, class_colors, clas
             point4 = (int(center[0] - vector1[0] + vector2[0]), int(center[1] - vector1[1] + vector2[1]))
             point_list = np.array([point1, point2, point3, point4])
 
-            # anticlockwise:red, blue, green, white
-            cv2.circle(image_rgb, [int(center[0] + vector1[0] + vector2[0]), int(center[1] + vector1[1] + vector2[1])], 3, [0, 0, 255], 3)
-            cv2.circle(image_rgb, [int(center[0] + vector1[0] - vector2[0]), int(center[1] + vector1[1] - vector2[1])], 3, [0, 255, 0], 3)
-            cv2.circle(image_rgb, [int(center[0] - vector1[0] - vector2[0]), int(center[1] - vector1[1] - vector2[1])], 3, [255, 0, 0], 3)
-            cv2.circle(image_rgb, [int(center[0] - vector1[0] + vector2[0]), int(center[1] - vector1[1] + vector2[1])], 3, [255, 255, 255], 3)
+            # # anticlockwise:red, blue, green, white
+            # cv2.circle(image_rgb, [int(center[0] + vector1[0] + vector2[0]), int(center[1] + vector1[1] + vector2[1])], 3, [0, 0, 255], 3)
+            # cv2.circle(image_rgb, [int(center[0] + vector1[0] - vector2[0]), int(center[1] + vector1[1] - vector2[1])], 3, [0, 255, 0], 3)
+            # cv2.circle(image_rgb, [int(center[0] - vector1[0] - vector2[0]), int(center[1] - vector1[1] - vector2[1])], 3, [255, 0, 0], 3)
+            # cv2.circle(image_rgb, [int(center[0] - vector1[0] + vector2[0]), int(center[1] - vector1[1] + vector2[1])], 3, [255, 255, 255], 3)
 
             cv2.drawContours(image_rgb, [point_list], -1, class_colors[class_id], 2)
             cv2.putText(image_rgb, class_name, (int(x_center), int(y_center)),
