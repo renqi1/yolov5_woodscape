@@ -11,8 +11,8 @@
 
 ### 标签格式
 
-用Opencv法表示标签，即（x, y, w, h, angle），之所以这么表示，是因为从语义标签生成的旋转框就是这种形式，
-而且用旋转框的标注工具[rolabelimg](https://github.com/cgvict/roLabelImg)生成的也是这种格式（
+用Opencv法表示标签，即（x, y, w, h, angle），之所以这么表示，是因为从语义标签生成(调用的opencv库)的旋转框就是这种形式，
+而且标注自己的数据集时用到的旋转框的标注工具[rolabelimg](https://github.com/cgvict/roLabelImg)生成的也是这种格式（
 用这个标的时候角度统一往右边旋转，就是按v，生成的xml再转yolo就行了）。标签加载的时候自己会转为长短边表示。
 
 <img src="images/label.jpg" width="800px"/>
