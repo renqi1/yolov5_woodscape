@@ -117,7 +117,11 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
             output_details = interpreter.get_output_details()  # outputs
             int8 = input_details[0]['dtype'] == np.uint8  # is TFLite quantized uint8 model
     imgsz = check_img_size(imgsz, s=stride)  # check image size
-
+            
+    # detect angle
+    cls_theta = model.yaml.get('cls_theta')
+    cls_theta = 0 if cls_theta is None else cls_theta
+            
     # Dataloader
     if webcam:
         view_img = check_imshow()
@@ -182,10 +186,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
 
         # NMS
         # pred:list*(n, [xywh,conf,cls,theta]) -nms-> x,y,x,y,conf,cls,theta !!!
-        cls_theta = model.yaml.get('cls_theta')
-        if cls_theta is None or cls_theta == 0:
+        if cls_theta == 0:
             pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-            cls_theta = 0
         else:
             pred = non_max_suppression_rotate(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det, cls_theta=cls_theta, rotate_nms=rotate_nms)
         dt[2] += time_sync() - t3
