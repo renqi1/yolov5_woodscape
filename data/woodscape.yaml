@@ -1,0 +1,8 @@
+# 水平框
+train: /home/gzz/机械硬盘/sda3/woodscape/woodscape/images/train
+val: /home/gzz/机械硬盘/sda3/woodscape/woodscape/images/val
+
+
+# Classes
+nc: 5  # number of classes
+names: ["vehicles", "person", "bicycle", "traffic_light", "traffic_sign"]  # class names
