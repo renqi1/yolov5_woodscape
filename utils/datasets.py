@@ -92,11 +92,12 @@ def exif_transpose(image):
     return image
 
 
-def create_dataloader(path, imgsz, batch_size, stride, single_cls=False, hyp=None, augment=False, cache=False, pad=0.0,
+def create_dataloader(path, imgsz, batch_size, stride, single_cls=False, seg=False, hyp=None, augment=False, cache=False, pad=0.0,
                       rect=False, rank=-1, workers=8, image_weights=False, quad=False, prefix=''):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
         dataset = LoadImagesAndLabels(path, imgsz, batch_size,
+                                      seg=seg,
                                       augment=augment,  # augment images
                                       hyp=hyp,  # augmentation hyperparameters
                                       rect=rect,  # rectangular training
@@ -117,7 +118,7 @@ def create_dataloader(path, imgsz, batch_size, stride, single_cls=False, hyp=Non
                         num_workers=nw,
                         sampler=sampler,
                         pin_memory=True,
-                        collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn)
+                        collate_fn=LoadImagesAndLabels.collate_fn_seg if seg else LoadImagesAndLabels.collate_fn)
     return dataloader, dataset
 
 
@@ -220,7 +221,7 @@ class LoadImages:
             print(f'image {self.count}/{self.nf} {path}: ', end='')
 
         # Padded resize
-        img = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[0]
+        img = letterbox(img0, None, self.img_size, stride=self.stride, auto=self.auto)[0]
 
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
@@ -373,13 +374,19 @@ def img2label_paths(img_paths):
     return [sb.join(x.rsplit(sa, 1)).rsplit('.', 1)[0] + '.txt' for x in img_paths]
 
 
+def img2seg_label_paths(img_paths):
+    sa, sb = os.sep + 'images' + os.sep, os.sep + 'seglabels' + os.sep
+    return [sb.join(x.rsplit(sa, 1)) for x in img_paths]
+
+
 class LoadImagesAndLabels(Dataset):
     # YOLOv5 train_loader/val_loader, loads images and labels for training and validation
     cache_version = 0.5  # dataset labels *.cache version
 
-    def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
+    def __init__(self, path, img_size=640, batch_size=16, seg=False, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images=False, single_cls=False, stride=32, pad=0.0, prefix=''):
         self.img_size = img_size
+        self.seg = seg
         self.augment = augment
         self.hyp = hyp
         self.image_weights = image_weights
@@ -437,6 +444,7 @@ class LoadImagesAndLabels(Dataset):
         self.shapes = np.array(shapes, dtype=np.float64)
         self.img_files = list(cache.keys())  # update
         self.label_files = img2label_paths(cache.keys())  # update
+        self.seg_label_files = img2seg_label_paths(cache.keys()) if seg else []
         if single_cls:
             for x in self.labels:
                 x[:, 0] = 0
@@ -545,13 +553,13 @@ class LoadImagesAndLabels(Dataset):
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
-
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
-        if mosaic:
+        if mosaic and not self.seg:
             # Load mosaic
             img, labels = load_mosaic(self, index)
             shapes = None
+            seg = None
 
             # MixUp augmentation
             if random.random() < hyp['mixup']:
@@ -568,24 +576,33 @@ class LoadImagesAndLabels(Dataset):
                 ratio = (1, 1)
                 h, w = 640, 640
                 img = cv2.resize(img, (h, w), interpolation=cv2.INTER_LINEAR)
+                if self.seg:
+                    seg = load_seg_label(self, index, h_crop, w_crop, offset_h, offset_w, crop=crop)
+                    seg = cv2.resize(seg, (h, w), interpolation=cv2.INTER_LINEAR)
+                else:
+                    seg = None
                 if len(labels) < hyp["k"]:  # do not crop if boxes of the crop image less than k (k = 1,2,3...)
                     labels = self.labels[index].copy()
                     img, (h0, w0), (h, w), _ = load_image(self, index)
-                    img, ratio, pad = letterbox(img, self.img_size, auto=False, scaleup=self.augment)
+                    if self.seg:
+                        seg = load_seg_label(self, index, h_resize=h, w_resize=w)
+                    img, seg, ratio, pad = letterbox(img, seg=seg, new_shape=self.img_size, auto=False, scaleup=self.augment)
 
             else:
                 # Letterbox
                 img, (h0, w0), (h, w), _ = load_image(self, index)
+                seg = load_seg_label(self, index, h_resize=h, w_resize=w) if self.seg else None
                 shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-                img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+                img, seg, ratio, pad = letterbox(img, seg=seg, new_shape=shape, auto=False, scaleup=self.augment)
 
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
             if labels.size:  # normalized xywh to pixel xyxy format
-                    labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
 
-            if self.augment and hyp['cls_theta'] == 0:  # do not support random perspective now if use rotate detection.
-                img, labels = random_perspective(img, labels,
+            if self.augment and hyp['cls_theta'] == 0:
+            # do not support random perspective now if use rotate detection.
+                img, labels, seg = random_perspective(img, labels, seg,
                                                  degrees=hyp['degrees'],
                                                  translate=hyp['translate'],
                                                  scale=hyp['scale'],
@@ -611,6 +628,8 @@ class LoadImagesAndLabels(Dataset):
                     labels[:, 2] = 1 - labels[:, 2]
                     if hyp['cls_theta'] != 0:
                         labels[:, 5] = 180.0 - labels[:, 5]
+                if self.seg:
+                    seg = np.flipud(seg)
             # Flip left-right
             if random.random() < hyp['fliplr']:
                 img = np.fliplr(img)
@@ -618,7 +637,8 @@ class LoadImagesAndLabels(Dataset):
                     labels[:, 1] = 1 - labels[:, 1]
                     if hyp['cls_theta'] != 0:
                         labels[:, 5] = 180.0 - labels[:, 5]
-
+                if self.seg:
+                    seg = np.fliplr(seg)
             # Cutouts
             # labels = cutout(img, labels, p=0.5)
 
@@ -636,45 +656,27 @@ class LoadImagesAndLabels(Dataset):
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)
+        seg = np.ascontiguousarray(seg).copy()
+        if self.seg:
+            return torch.from_numpy(img), labels_out, torch.LongTensor(seg), self.img_files[index], shapes
+        return torch.from_numpy(img), labels_out, None, self.img_files[index], shapes
 
-        return torch.from_numpy(img), labels_out, self.img_files[index], shapes
+    @staticmethod
+    def collate_fn_seg(batch):
+        img, label, seg, path, shapes = zip(*batch)  # transposed
+        for i, l in enumerate(label):
+            l[:, 0] = i  # add target image index for build_targets()
+        return torch.stack(img, 0), torch.cat(label, 0), torch.stack(seg, 0), path, shapes
 
     @staticmethod
     def collate_fn(batch):
-        img, label, path, shapes = zip(*batch)  # transposed
+        img, label, _, path, shapes = zip(*batch)  # transposed
         for i, l in enumerate(label):
             l[:, 0] = i  # add target image index for build_targets()
-        return torch.stack(img, 0), torch.cat(label, 0), path, shapes
-
-    @staticmethod
-    def collate_fn4(batch):
-        img, label, path, shapes = zip(*batch)  # transposed
-        n = len(shapes) // 4
-        img4, label4, path4, shapes4 = [], [], path[:n], shapes[:n]
-
-        ho = torch.tensor([[0., 0, 0, 1, 0, 0]])
-        wo = torch.tensor([[0., 0, 1, 0, 0, 0]])
-        s = torch.tensor([[1, 1, .5, .5, .5, .5]])  # scale
-        for i in range(n):  # zidane torch.zeros(16,3,720,1280)  # BCHW
-            i *= 4
-            if random.random() < 0.5:
-                im = F.interpolate(img[i].unsqueeze(0).float(), scale_factor=2., mode='bilinear', align_corners=False)[
-                    0].type(img[i].type())
-                l = label[i]
-            else:
-                im = torch.cat((torch.cat((img[i], img[i + 1]), 1), torch.cat((img[i + 2], img[i + 3]), 1)), 2)
-                l = torch.cat((label[i], label[i + 1] + ho, label[i + 2] + wo, label[i + 3] + ho + wo), 0) * s
-            img4.append(im)
-            label4.append(l)
-
-        for i, l in enumerate(label4):
-            l[:, 0] = i  # add target image index for build_targets()
-
-        return torch.stack(img4, 0), torch.cat(label4, 0), path4, shapes4
+        return torch.stack(img, 0), torch.cat(label, 0), [], path, shapes
 
 
 # Ancillary functions --------------------------------------------------------------------------------------------------
-
 # refer to the code of mmdetection:https://github.com/open-mmlab/mmocr/blob/main/mmocr/datasets/transforms/ocr_transforms.py
 def crop_label(label, h0, w0, h, w, offset_h, offset_w, tolerance=10):
     label = np.copy(label)
@@ -706,6 +708,7 @@ def encode_theta(theta, num_class, u=0, sig=1.0, type='gaussian'):
         index = np.array((num_class/2 - cls_theta), dtype=int)
         for i in range(len(theta)):
             labels_theta[i] = np.concatenate([y_sig[index[i]:], y_sig[:index[i]]], axis=0)
+    # you can define other functions
     return labels_theta
 
 
@@ -738,6 +741,18 @@ def load_image(self, i, crop=False, crop_size=(640, 480, 320)):
             return im, (h0, w0), im.shape[:2], (0, 0)  # im, hw_original, hw_resized
     else:
         return self.imgs[i], self.img_hw0[i], self.img_hw[i], (0, 0)  # im, hw_original, hw_resized
+
+
+def load_seg_label(self, i, h_crop=640, w_crop=640, offset_h=0, offset_w=0, h_resize=640, w_resize=640, crop=False):
+    slpath = self.seg_label_files[i]
+    seg_label = cv2.imread(slpath, cv2.IMREAD_GRAYSCALE)
+    if crop:
+        crop_y1, crop_y2 = offset_h, offset_h + h_crop
+        crop_x1, crop_x2 = offset_w, offset_w + w_crop
+        return seg_label[crop_y1:crop_y2, crop_x1:crop_x2]
+    else:
+        seg_label = cv2.resize(seg_label, (int(w_resize), int(h_resize)))
+        return seg_label
 
 
 def load_mosaic(self, index):

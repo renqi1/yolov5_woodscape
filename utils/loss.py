@@ -90,7 +90,8 @@ class QFocalLoss(nn.Module):
 
 class ComputeLoss:
     # Compute losses
-    def __init__(self, model, autobalance=False, riou=False):
+    def __init__(self, model, autobalance=False, riou=False, seg=False):
+        self.seg = seg
         self.riou = riou
         self.sort_obj_iou = False
         device = next(model.parameters()).device  # get model device
@@ -110,22 +111,25 @@ class ComputeLoss:
             if h['cls_theta'] > 1:
                 BCEtheta = FocalLoss(BCEtheta, g)
 
-        det = model.module.model[-1] if is_parallel(model) else model.model[-1]  # Detect() module
+        det = model.module.model[model.det_idx] if is_parallel(model) else model.model[model.det_idx]  # Detect() module
         self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.06, .02])  # P3-P7
         self.ssi = list(det.stride).index(16) if autobalance else 0  # stride 16 index
         self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
         self.BCEtheta = BCEtheta
         self.MSEtheta = nn.MSELoss()
+        self.SEGLOSS = nn.CrossEntropyLoss(ignore_index=114).to(device)
+        # self.SEGLOSS = nn.CrossEntropyLoss(weight=torch.tensor([1.0, 1.0, 1.0, 5.0], device=device), ignore_index=114)
         for k in 'na', 'nc', 'nl', 'anchors':
             setattr(self, k, getattr(det, k))
 
-    def __call__(self, p, targets):  # predictions, targets, model
+    def __call__(self, p, targets, segments):  # predictions, targets, model
         device = targets.device
-        lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
-        tcls, tbox, indices, anchors, ttheta = self.build_targets(p, targets)  # targets
+        lcls, lbox, lobj, lseg = torch.zeros(1, device=device), torch.zeros(1, device=device), \
+                                 torch.zeros(1, device=device), torch.zeros(1, device=device)
+        tcls, tbox, indices, anchors, ttheta = self.build_targets(p[0], targets)  # targets
         ltheta = torch.zeros(1, device=device)
         # Losses
-        for i, pi in enumerate(p):  # layer index, layer predictions
+        for i, pi in enumerate(p[0]):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
             tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
 
@@ -176,15 +180,19 @@ class ComputeLoss:
             if self.autobalance:
                 self.balance[i] = self.balance[i] * 0.9999 + 0.0001 / obji.detach().item()
 
+        if self.seg:
+            lseg = self.hyp['seg'] * self.SEGLOSS(p[1], segments).unsqueeze(0)
+
         if self.autobalance:
             self.balance = [x / self.balance[self.ssi] for x in self.balance]
         lbox *= self.hyp['box']
         lobj *= self.hyp['obj']
         lcls *= self.hyp['cls']
         ltheta *= self.hyp['theta']
+        lseg *= self.hyp['seg']
         bs = tobj.shape[0]  # batch size
 
-        return (lbox + lobj + lcls + ltheta) * bs, torch.cat((lbox, lobj, lcls, ltheta)).detach()
+        return (lbox + lobj + lcls + ltheta + lseg) * bs, torch.cat((lbox, lobj, lcls, ltheta, lseg)).detach()
 
 
     def build_targets(self, p, targets):
@@ -238,7 +246,7 @@ class ComputeLoss:
 
             # Append
             a = t[:, -1].long()  # anchor indices
-            indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
+            indices.append((b, a, gj.clamp_(0, gain[3].long() - 1), gi.clamp_(0, gain[2].long() - 1)))  # image, anchor, grid indices
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class

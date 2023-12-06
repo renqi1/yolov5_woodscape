@@ -450,7 +450,8 @@ def plot_evolve(evolve_csv='path/to/evolve.csv'):  # from utils.plots import *; 
 def plot_results(file='path/to/results.csv', dir=''):
     # Plot training results.csv. Usage: from utils.plots import *; plot_results('path/to/results.csv')
     save_dir = Path(file).parent if file else Path(dir)
-    fig, ax = plt.subplots(2, 6, figsize=(18, 6), tight_layout=True)
+    # fig, ax = plt.subplots(2, 5, figsize=(12, 6), tight_layout=True)
+    fig, ax = plt.subplots(3, 5, figsize=(12, 9), tight_layout=True)
     ax = ax.ravel()
     files = list(save_dir.glob('results*.csv'))
     assert len(files), f'No results.csv files found in {save_dir.resolve()}, nothing to plot.'
@@ -460,7 +461,7 @@ def plot_results(file='path/to/results.csv', dir=''):
             s = [x.strip() for x in data.columns]
             x = data.values[:, 0]
             # for i, j in enumerate([1, 2, 3, 4, 5, 8, 9, 10, 6, 7]):
-            for i, j in enumerate([1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 7, 8]):
+            for i, j in enumerate([1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 6, 7, 8, 9, 10]):
                 y = data.values[:, j]
                 # y[y == 0] = np.nan  # don't show zero values
                 ax[i].plot(x, y, marker='.', label=f.stem, linewidth=2, markersize=8)

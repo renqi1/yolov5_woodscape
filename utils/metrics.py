@@ -14,8 +14,8 @@ import torch
 
 def fitness(x):
     # Model fitness as a weighted combination of metrics
-    w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
-    return (x[:, :4] * w).sum(1)
+    w = [0.0, 0.0, 0.1, 0.9, 0.3]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95, mIoU]
+    return (x[:, :5] * w).sum(1)
 
 
 def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', names=()):
@@ -243,6 +243,7 @@ def rotate_iou(pbox, tbox, tbox_theta, eps=1e-7, w=0.1):
 
     b1_theta = pbox[4]
     deta_theta = torch.abs(b1_theta - tbox_theta)
+
     # solve PoA problem
     cycle_inds = deta_theta > 0.5
     deta_theta[cycle_inds] = 1-deta_theta[cycle_inds]

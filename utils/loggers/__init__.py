@@ -37,9 +37,9 @@ class Loggers():
         #              'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',  # metrics
         #              'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
         #              'x/lr0', 'x/lr1', 'x/lr2']  # params
-        self.keys = ['train/box_loss', 'train/obj_loss', 'train/cls_loss', 'train/theta_loss', # train loss
-                     'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',  # metrics
-                     'val/box_loss', 'val/obj_loss', 'val/cls_loss', 'val/theta_loss',  # val loss
+        self.keys = ['train/box_loss', 'train/obj_loss', 'train/cls_loss', 'train/theta_loss', 'train/seg_loss', # train loss
+                     'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95', 'metrics/mIoU', # metrics
+                     'val/box_loss', 'val/obj_loss', 'val/cls_loss', 'val/theta_loss', 'val/seg_loss',  # val loss
                      'x/lr0', 'x/lr1', 'x/lr2']  # params
         for k in LOGGERS:
             setattr(self, k, None)  # init empty logger dictionary
@@ -76,11 +76,11 @@ class Loggers():
     def on_train_batch_end(self, ni, model, imgs, targets, paths, plots, sync_bn, cls_theta=0):
         # Callback runs on train batch end
         if plots:
-            if ni == 0:
-                if not sync_bn:  # tb.add_graph() --sync known issue https://github.com/ultralytics/yolov5/issues/3754
-                    with warnings.catch_warnings():
-                        warnings.simplefilter('ignore')  # suppress jit trace warning
-                        self.tb.add_graph(torch.jit.trace(de_parallel(model), imgs[0:1], strict=False), [])
+            # if ni == 0:
+            #     if not sync_bn:  # tb.add_graph() --sync known issue https://github.com/ultralytics/yolov5/issues/3754
+            #         with warnings.catch_warnings():
+            #             warnings.simplefilter('ignore')  # suppress jit trace warning
+            #             self.tb.add_graph(torch.jit.trace(de_parallel(model), imgs[0:1], strict=False), [])
             if ni < 3:
                 f = self.save_dir / f'train_batch{ni}.jpg'  # filename
                 Thread(target=plot_images, args=(imgs, targets, cls_theta, paths, f), daemon=True).start()
