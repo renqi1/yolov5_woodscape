@@ -2,11 +2,14 @@
 
 检测结果展示：
 
-<img src="images/00015FV.png" width="350px"/><img src="images/00079_RV.png" width="350px"/>
-<img src="images/00169MVL.png" width="350px"/><img src="images/00062_MVR.png" width="350px"/>
+<img src="images/00015_FV.png" width="350px"/><img src="images/00079_RV.png" width="350px"/>
+<img src="images/00169_MVL.png" width="350px"/><img src="images/00062_MVR.png" width="350px"/>
 
 
 上面的结果只做了四类分割：background、road、lanemarks、curb。
+
+只做旋转框目标检测，见之前的版本：https://github.com/renqi1/yolov5_woodscape/tree/v1.0
+
 
 ### 数据集训练格式
 
@@ -25,7 +28,7 @@
 └─└── val
 ```
 
-### 较之前的更改
+### 较上版本的更改
 
 若要做分割任务，仅需在模型文件添加seg分支（无该分支默认为检测任务），并设置分割类别数cls_seg。
 
