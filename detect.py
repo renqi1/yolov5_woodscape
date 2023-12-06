@@ -31,6 +31,14 @@ from utils.plots import Annotator, colors
 from utils.torch_utils import load_classifier, select_device, time_sync
 
 
+WOODSCAPE_COLORMAP = [
+    [0, 0, 0],      # blcak: background
+    [255, 0, 255],  # purple: road
+    [255, 0, 0],    # blue: lanemarks
+    [0, 255, 0],    # green: curb
+]
+
+
 @torch.no_grad()
 def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         source=ROOT / 'data/images',  # file/dir/URL/glob, 0 for webcam
@@ -46,7 +54,6 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         nosave=False,  # do not save images/videos
         classes=None,  # filter by class: --class 0, or --class 0 2 3
         agnostic_nms=False,  # class-agnostic NMS
-        augment=False,  # augmented inference
         visualize=False,  # visualize features
         update=False,  # update all models
         project=ROOT / 'runs/detect',  # save results to project/name
@@ -117,11 +124,19 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
             output_details = interpreter.get_output_details()  # outputs
             int8 = input_details[0]['dtype'] == np.uint8  # is TFLite quantized uint8 model
     imgsz = check_img_size(imgsz, s=stride)  # check image size
-            
+
     # detect angle
     cls_theta = model.yaml.get('cls_theta')
     cls_theta = 0 if cls_theta is None else cls_theta
-            
+
+    # detect segment
+    if not hasattr(model, 'out_idx'):
+        setattr(model, 'out_idx', [24])
+    if len(model.out_idx) > 1:
+        seg = True
+    else:
+        seg = False
+
     # Dataloader
     if webcam:
         view_img = check_imshow()
@@ -137,7 +152,9 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
     if pt and device.type != 'cpu':
         model(torch.zeros(1, 3, *imgsz).to(device).type_as(next(model.parameters())))  # run once
     dt, seen = [0.0, 0.0, 0.0], 0
+    colormap = np.array(WOODSCAPE_COLORMAP, dtype='uint8')
     for path, img, im0s, vid_cap in dataset:
+
         t1 = time_sync()
         if onnx:
             img = img.astype('float32')
@@ -153,7 +170,9 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         # Inference
         if pt:
             visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
-            pred = model(img, augment=augment, visualize=visualize)[0]
+            outputs = model(img, visualize=visualize)
+            pred = outputs[0][0]
+            seg_out = outputs[1] if seg else None
         elif onnx:
             if dnn:
                 net.setInput(img)
@@ -213,7 +232,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
             if len(det):
                 # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                det[:, :4], pad = scale_coords(img.shape[2:], det[:, :4], im0.shape)
 
                 # Print results
                 cl = det[:, -1] if cls_theta == 0 else det[:, -2]
@@ -255,6 +274,15 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
 
             # Stream results
             im0 = annotator.result()
+
+            # segment results
+            if seg:
+                mask = torch.argmax(seg_out, dim=1).cpu().numpy().squeeze(0)
+                mask = colormap[mask, :]
+                mask = mask[int(pad[1]):int(mask.shape[0] - pad[1]), int(pad[0]):int(mask.shape[1] - pad[0])]
+                mask = cv2.resize(mask, (im0.shape[1], im0.shape[0]))
+                im0 = cv2.addWeighted(mask, 0.4, im0, 0.6, 0)
+
             if view_img:
                 cv2.imshow(str(p), im0)
                 cv2.waitKey(1)  # 1 millisecond
@@ -278,6 +306,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                         vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                     vid_writer[i].write(im0)
 
+
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
     print(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}' % t)
@@ -291,11 +320,11 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
 def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--rotate_nms', nargs='+', type=bool, default=False, help='rotate nms code may be wrong, not recommended to use')
-    parser.add_argument('--weights', nargs='+', type=str, default='runrotate/train/exp4/weights/best.pt', help='model path(s)')
-    parser.add_argument('--source', type=str, default='data/images', help='source')
+    parser.add_argument('--weights', nargs='+', type=str, default='runseg/train/exp/weights/best.pt', help='model path(s)')
+    parser.add_argument('--source', type=str, default='data/image', help='source')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')
-    parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.2, help='NMS IoU threshold')
     parser.add_argument('--max-det', type=int, default=1000, help='maximum detections per image')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--view-img', action='store_true', help='show results')
@@ -305,7 +334,6 @@ def parse_opt():
     parser.add_argument('--nosave', default=False, help='do not save images/videos')
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --classes 0, or --classes 0 2 3')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
-    parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--visualize', default=False, help='visualize features')
     parser.add_argument('--update', action='store_true', help='update all models')
     parser.add_argument('--project', default=ROOT / 'detect', help='save results to project/name')

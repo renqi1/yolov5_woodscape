@@ -85,8 +85,8 @@ def run(data,
         weights=None,  # model.pt path(s)
         batch_size=32,  # batch size
         imgsz=640,  # inference size (pixels)
-        conf_thres=0.25,  # confidence threshold
-        iou_thres=0.45,  # NMS IoU threshold
+        conf_thres=0.01,  # confidence threshold
+        iou_thres=0.6,  # NMS IoU threshold
         task='val',  # train, val, test, speed or study
         device='',  # cuda device, i.e. 0 or 0,1,2,3 or cpu
         single_cls=False,  # treat as single-class dataset
@@ -99,7 +99,7 @@ def run(data,
         project=ROOT / 'runs/val',  # save to project/name
         name='exp',  # save to project/name
         exist_ok=False,  # existing project/name ok, do not increment
-        half=True,  # use FP16 half-precision inference
+        half=False,  # set False to avoid val segloss is nan
         model=None,
         dataloader=None,
         save_dir=Path(''),
@@ -137,8 +137,19 @@ def run(data,
     half &= device.type != 'cpu'  # half precision only supported on CUDA
     model.half() if half else model.float()
 
+    # detect segment
+    if not hasattr(model, 'out_idx'):
+        setattr(model, 'out_idx', [24])
+    if len(model.out_idx) > 1:
+        seg = True
+    else:
+        seg = False
+    cls_seg = model.yaml.get('cls_seg')
+
+    # detect angle
     cls_theta = model.yaml.get('cls_theta')
     cls_theta = 0 if cls_theta is None else cls_theta
+
     # Configure
     model.eval()
     is_coco = isinstance(data.get('val'), str) and data['val'].endswith('coco/val2017.txt')  # COCO dataset
@@ -152,21 +163,21 @@ def run(data,
             model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
         pad = 0.0 if task == 'speed' else 0.5
         task = task if task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
-        dataloader = create_dataloader(data[task], imgsz, batch_size, gs, single_cls,
-                                       hyp={'cls_theta': cls_theta, 'sig': 1}, pad=pad, rect=True,
+        dataloader = create_dataloader(data[task], imgsz, batch_size, gs, single_cls, seg,
+                                       hyp={'cls_theta': cls_theta, 'sig': 1}, pad=pad, rect=False,
                                        prefix=colorstr(f'{task}: '))[0]
 
     seen = 0
     confusion_matrix = ConfusionMatrix(nc=nc)
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     class_map = coco80_to_coco91_class() if is_coco else list(range(1000))
-    s = ('%20s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
-    dt, p, r, f1, mp, mr, map50, map = [0.0, 0.0, 0.0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-    loss = torch.zeros(4, device=device)
+    s = ('%20s' + '%11s' * 7) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95', 'mIoU')
+    dt, p, r, f1, mp, mr, map50, map, miou = [0.0, 0.0, 0.0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    loss = torch.zeros(5, device=device)
     jdict, stats, ap, ap_class = [], [], [], []
     if rotate_nms:
         print('use rotate nms, this may take a long time...')
-    for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+    for batch_i, (img, targets, segments, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         t1 = time_sync()
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -177,12 +188,14 @@ def run(data,
         dt[0] += t2 - t1
 
         # Run model
-        out, train_out = model(img, augment=augment)  # inference and training outputs
+        outputs = model(img)  # inference and training outputs
+        (out, train_out) = outputs[0]
+        seg_out = outputs[1] if seg else None
         dt[1] += time_sync() - t2
 
         # Compute loss
         if compute_loss:
-            loss += compute_loss([x.float() for x in train_out], targets)[1]  # box, obj, cls
+            loss += compute_loss([[x.float() for x in train_out], seg_out], targets, segments.to(device) if seg else None)[1]  # box, obj, cls, theta, seg
 
         # Run NMS
         targets[:, 2:6] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
@@ -235,7 +248,6 @@ def run(data,
 
         # Plot images
         if plots and batch_i < 3:
-        # if plots and batch_i < 3 and cls_theta == 0:
             f = save_dir / f'val_batch{batch_i}_labels.jpg'  # labels
             if cls_theta > 1:
                 _, theta = torch.max(targets[:, 6:], 1, keepdim=True)
@@ -254,9 +266,28 @@ def run(data,
     else:
         nt = torch.zeros(1)
 
+    # to save time, only compute miou of one batch
+    if seg:
+        _, seg_predict = torch.max(seg_out, 1)
+        seg_predict = seg_predict.cpu().numpy().astype('int64') + 1
+        segments = segments.cpu().numpy().astype('int64') + 1
+        # seg_predict = seg_predict * (segments > 0).astype(seg_predict.dtype)
+        intersection = seg_predict * (seg_predict == segments)
+        # areas of intersection and union
+        area_inter, _ = np.histogram(intersection, bins=cls_seg, range=(1, cls_seg+1))
+        area_pred, _ = np.histogram(seg_predict, bins=cls_seg, range=(1, cls_seg+1))
+        area_lab, _ = np.histogram(segments, bins=cls_seg, range=(1, cls_seg+1))
+        area_union = area_pred + area_lab - area_inter
+        iou = area_inter / (np.spacing(1) + area_union)
+        miou = iou.mean()
+
+
+
     # Print results
     pf = '%20s' + '%11i' * 2 + '%11.3g' * 4  # print format
-    print(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
+    print(pf % ('all', seen, nt.sum(), mp, mr, map50, map), '%11.3g' % (miou))
+    if seg:
+        print('IoU of each segment class: ', *iou)
 
     # Print results per class
     if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats):
@@ -283,22 +314,22 @@ def run(data,
         with open(pred_json, 'w') as f:
             json.dump(jdict, f)
 
-        try:  # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
-            check_requirements(['pycocotools'])
-            from pycocotools.coco import COCO
-            from pycocotools.cocoeval import COCOeval
-
-            anno = COCO(anno_json)  # init annotations api
-            pred = anno.loadRes(pred_json)  # init predictions api
-            eval = COCOeval(anno, pred, 'bbox')
-            if is_coco:
-                eval.params.imgIds = [int(Path(x).stem) for x in dataloader.dataset.img_files]  # image IDs to evaluate
-            eval.evaluate()
-            eval.accumulate()
-            eval.summarize()
-            map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
-        except Exception as e:
-            print(f'pycocotools unable to run: {e}')
+        # try:  # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
+        #     check_requirements(['pycocotools'])
+        #     from pycocotools.coco import COCO
+        #     from pycocotools.cocoeval import COCOeval
+        #
+        #     anno = COCO(anno_json)  # init annotations api
+        #     pred = anno.loadRes(pred_json)  # init predictions api
+        #     eval = COCOeval(anno, pred, 'bbox')
+        #     if is_coco:
+        #         eval.params.imgIds = [int(Path(x).stem) for x in dataloader.dataset.img_files]  # image IDs to evaluate
+        #     eval.evaluate()
+        #     eval.accumulate()
+        #     eval.summarize()
+        #     map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
+        # except Exception as e:
+        #     print(f'pycocotools unable to run: {e}')
 
     # Return results
     model.float()  # for training
@@ -308,14 +339,14 @@ def run(data,
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
-    return (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist()), maps, t
+    return (mp, mr, map50, map, miou, *(loss.cpu() / len(dataloader)).tolist()), maps, t
 
 
 def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--rotate_nms', nargs='+', type=bool, default=False, help='not recommended to use, too much time and some bugs')
     parser.add_argument('--data', type=str, default=ROOT / 'data/woodscape_rotate.yaml', help='dataset.yaml path')
-    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'runrotate/train/exp4/weights/best.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'runseg/train/exp/weights/best.pt', help='model.pt path(s)')
     parser.add_argument('--batch-size', type=int, default=32, help='batch size')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')
@@ -323,13 +354,12 @@ def parse_opt():
     parser.add_argument('--task', default='val', help='train, val, test, speed or study')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--single-cls', action='store_true', help='treat as single-class dataset')
-    parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--verbose', action='store_true', help='report mAP by class')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
     parser.add_argument('--save-hybrid', action='store_true', help='save label+prediction hybrid results to *.txt')
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--save-json', action='store_true', help='save a COCO-JSON results file')
-    parser.add_argument('--project', default=ROOT / 'val', help='save to project/name')
+    parser.add_argument('--project', default=ROOT / 'valseg', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
