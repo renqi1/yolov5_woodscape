@@ -51,7 +51,7 @@
 
 
 ### 与yolov8_seg的区别
-我在做这个的时候恰好yolov8也出了分割模型，v8的分割头构建类似mask rcnn，而本项目的分割头是从FPN上采样后引出,类似Unet的结构。
+我在做这个的时候恰好yolov8也出了分割模型，v8的分割头构建类似mask rcnn，而本项目的分割头是从FPN上采样后引出,类似Unet的结构，参考的是yolop。
 此外，yolov8的标签与yolov5不兼容，它是多边形标签，而且检测和分割的是同样的物体，感觉任务有点重复。
 而本项目则可以在检测模型的基础上再训练分割模型，只要额外提供png分割标签，且灵活度更大，可以实现一些物体做检测，一些物体做分割。
 此外，根据需求，可以实现仅做检测任务，水平框+分割，旋转框+分割。
@@ -61,6 +61,7 @@
 
 * [midasklr/yolov5ds](https://github.com/midasklr/yolov5ds)
 * [TomMao23/multiyolov5-BS2021](https://github.com/TomMao23/multiyolov5)
+* [hustvl/YOLOP](https://github.com/hustvl/YOLOP)
 * [hukaixuan19970627/yolov5_obb](https://github.com/hukaixuan19970627/yolov5_obb)
 * [BossZard/rotation-yolov5](https://github.com/BossZard/rotation-yolov5)
 * [ultralytics/yolov5](https://github.com/ultralytics/yolov5)
