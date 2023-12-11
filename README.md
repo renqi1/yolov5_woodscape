@@ -10,6 +10,8 @@
 
 只做旋转框目标检测，见之前的版本：https://github.com/renqi1/yolov5_woodscape/tree/v1.0
 
+### 网络结构
+<img src="images/yolov5-m.jpg" width="700px"/>
 
 ### 数据集训练格式
 
