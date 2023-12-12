@@ -376,7 +376,7 @@ def img2label_paths(img_paths):
 
 def img2seg_label_paths(img_paths):
     sa, sb = os.sep + 'images' + os.sep, os.sep + 'seglabels' + os.sep
-    return [sb.join(x.rsplit(sa, 1)) for x in img_paths]
+    return [sb.join(x.rsplit(sa, 1)).rsplit('.', 1)[0] + '.png' for x in img_paths]
 
 
 class LoadImagesAndLabels(Dataset):
