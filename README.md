@@ -2,7 +2,8 @@
 
 检测结果展示：
 
-<img src="images/00015_FV.png" width="175px"/><img src="images/00079_RV.png" width="175px"/><img src="images/00169_MVL.png" width="175px"/><img src="images/00062_MVR.png" width="175px"/>
+<img src="images/00015_FV.png" width="350px"/><img src="images/00079_RV.png" width="350px"/>
+<img src="images/00169_MVL.png" width="350px"/><img src="images/00062_MVR.png" width="350px"/>
 
 
 上面的结果只做了四类分割：background、road、lanemarks、curb。
